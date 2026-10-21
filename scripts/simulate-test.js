@@ -644,6 +644,44 @@ async function testDayShiftDirectionByWindow() {
   console.log("OK: turno diurno — la dirección sale del horario, doble fichaje descartado, media jornada intacta.");
 }
 
+// 22/10: si Humand rechaza con 422 pero YA tiene ese fichaje (corregido a mano),
+// la marca se da por resuelta (no queda trabada) y el estado se alinea.
+async function testStuckPunchResolvedWhenHumandAlreadyHasIt() {
+  const store = require("../lib/store");
+  const iso = "2026-10-21T17:31:06Z"; // 14:31:06 ART
+  nightShiftRecordTimeIso = iso;
+  postClockEventImpl = async () => {
+    const err = new Error("422");
+    err.status = 422;
+    err.body = { code: "TIME_TRACKING_ENTRY_DUPLICATE" };
+    throw err;
+  };
+  const cases = [
+    ["Humand ya tiene la salida (carga manual 14:31:00)", [{ type: "END", time: "2026-10-21T17:31:00Z" }], 0, 1],
+    ["Humand NO la tiene -> sigue trabada", [{ type: "START", time: "2026-10-21T08:29:00Z" }], 1, 0],
+    ["salida lejana (17:22 auto-cierre) -> sigue trabada", [{ type: "END", time: "2026-10-21T20:22:00Z" }], 1, 0],
+  ];
+  for (const [desc, entries, expStuck, expResolved] of cases) {
+    daySummaryResponder = async () => ({ hasSchedule: true, timeSlots: [{ startTime: "05:30", endTime: "14:30" }], entries });
+    await store.upsertEmployeeState("client:Test Resuelta", "legajo-res", {
+      date: "2026-10-21", lastType: "END", lastRecordTimeMs: Date.parse("2026-10-21T05:00:00Z"),
+    });
+    await upsertClock({
+      id: "sim-resuelta", alias: "Simulado Resuelta", clientName: "Test Resuelta",
+      ip: "clock-nightshift.example", port: 4370, humandApiKey: "k", pollIntervalMinutes: 15,
+      userMap: { 88: "legajo-res" }, sentKeys: [],
+    });
+    const run = await syncClock("sim-resuelta");
+    await deleteClock("sim-resuelta");
+    if (run.stuckPunches.length !== expStuck || (run.resolvedManually || 0) !== expResolved) {
+      throw new Error(`resuelta (${desc}): stuck=${run.stuckPunches.length} resolved=${run.resolvedManually || 0}`);
+    }
+  }
+  daySummaryResponder = async () => null;
+  postClockEventImpl = async () => ({ ok: true, dryRun: false, simulated: true });
+  console.log("OK: 422 con el fichaje ya cargado a mano en Humand -> se da por resuelta y no queda trabada.");
+}
+
 (async () => {
   testArgentinaLocalTimeToUtcMs();
   testDirectionAlternation();
@@ -688,6 +726,7 @@ async function testDayShiftDirectionByWindow() {
   await testStuckPunch422();
   await testNightShiftDirectionByWindow();
   await testDayShiftDirectionByWindow();
+  await testStuckPunchResolvedWhenHumandAlreadyHasIt();
 })().catch((e) => {
   console.error("FALLÓ LA SIMULACIÓN:", e);
   process.exit(1);
