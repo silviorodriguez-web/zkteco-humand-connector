@@ -1,0 +1,22 @@
+name = "zkteco-connector-cron"
+main = "src/index.js"
+compatibility_date = "2026-08-14"
+
+# Cada 15 minutos — gratis y sin límite práctico en el free tier de Cloudflare
+# (96 disparos/día contra el tope de 100k/día).
+#
+# ⚠️ BAJADO de */5 a */15 el 28/8: con */5, cada disparo despertaba el
+# cómputo de Neon (free tier, 100 CU-hours/mes) antes de que llegara a
+# auto-suspenderse, manteniéndolo semi-activo las 24hs y agotando la cuota
+# mensual sin tráfico real de usuarios. Con */15 el compute tiene margen real
+# para hacer scale-to-zero entre disparos. Si hace falta sync más rápido para
+# algún cliente puntual, mejor evaluarlo por cliente (o subir de plan) antes
+# de volver a bajar este intervalo.
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+TARGET_BASE_URL = "https://<tu-deploy>.vercel.app"
+
+# CRON_SECRET se carga como secret (no queda en este archivo ni en git):
+#   npx wrangler secret put CRON_SECRET
